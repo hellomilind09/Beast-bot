@@ -39,3 +39,4 @@ jobs:
     ACTION_CHAT_ID: ${{ secrets.ACTION_CHAT_ID }}
     MARKET_CHAT_ID: ${{ secrets.MARKET_CHAT_ID }}
   run: python action_bot.py
+# force workflow refresh
