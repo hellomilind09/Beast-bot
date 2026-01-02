@@ -1,12 +1,15 @@
-from datetime import datetime
-import requests
 import os
+import requests
+from datetime import datetime
 from telegram import Bot
 
+# ENV
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 MARKET_CHAT_ID = os.environ["MARKET_CHAT_ID"]
 
 bot = Bot(BOT_TOKEN)
+
+# ---------- COINGECKO HELPERS ----------
 
 def cg(ids):
     return requests.get(
@@ -23,24 +26,41 @@ def narrative_check(category):
             "price_change_percentage": "7d"
         }
     ).json()
-    movers = [c for c in r if c.get("price_change_percentage_7d", 0) > 15]
+
+    movers = [
+        c for c in r
+        if c.get("price_change_percentage_7d", 0) > 15
+    ]
+
     return "Strong" if len(movers) >= 3 else "Weak"
 
-def market_report():
-    prices = cg("bitcoin,ethereum,pax-gold")
+# ---------- SHARED MACRO SCORE (DO NOT REMOVE) ----------
 
-    eth_btc = prices["ethereum"]["usd"] / prices["bitcoin"]["usd"]
-    gold = prices["pax-gold"]["usd"]
+def macro_score():
+    prices = cg("bitcoin,ethereum,pax-gold")
+    eth = prices["ethereum"]["usd"]
+    btc = prices["bitcoin"]["usd"]
+
+    eth_btc = eth / btc
 
     if eth_btc > 0.075:
-        regime = "Risk-On"
-        macro_score = 70
+        return 70
     elif eth_btc < 0.065:
+        return 35
+    else:
+        return 54
+
+# ---------- MARKET SNAPSHOT ----------
+
+def market_report():
+    score = macro_score()
+
+    if score >= 65:
+        regime = "Risk-On"
+    elif score <= 40:
         regime = "Risk-Off"
-        macro_score = 35
     else:
         regime = "Neutral"
-        macro_score = 54
 
     ai = narrative_check("artificial-intelligence")
     rwa = narrative_check("real-world-assets")
@@ -60,7 +80,7 @@ def market_report():
 🌍 MACRO REGIME
 ━━━━━━━━━━━━━━━━━━
 Risk Regime: {regime}
-Macro Score: {macro_score}/100
+Macro Score: {score}/100
 
 ━━━━━━━━━━━━━━━━━━
 🔥 NARRATIVE HEATMAP
@@ -72,14 +92,17 @@ DePIN / Infra: {depin}
 Gaming / Consumer: {gaming}
 
 ━━━━━━━━━━━━━━━━━━
-🏦 MACRO PROXY
-━━━━━━━━━━━━━━━━━━
-Gold Proxy: {"Rising" if gold > 2000 else "Stable"}
-
-━━━━━━━━━━━━━━━━━━
 🧭 ACTION
 ━━━━━━━━━━━━━━━━━━
 NONE — Observe only
 """
 
-    bot.send_message(chat_id=MARKET_CHAT_ID, text=msg)
+    bot.send_message(
+        chat_id=MARKET_CHAT_ID,
+        text=msg
+    )
+
+# ---------- RUN ----------
+
+if __name__ == "__main__":
+    market_report()
