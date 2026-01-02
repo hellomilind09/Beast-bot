@@ -1,4 +1,5 @@
-import schedule, time
+import schedule
+import time
 from telegram import Bot
 from config import BOT_TOKEN, PORTFOLIO_CHAT_ID
 
@@ -13,16 +14,17 @@ PORTFOLIO = {
 }
 
 def portfolio_risk():
-    l1_exposure = PORTFOLIO["AVAX"] + PORTFOLIO["NEAR"]
-    msg = f"""
-📊 PORTFOLIO RISK
+    layer1_exposure = PORTFOLIO["AVAX"] + PORTFOLIO["NEAR"]
 
-Layer-1 Exposure: {l1_exposure}%
-Enterprise Exposure: {PORTFOLIO["VET"]}%
+    message = f"""
+📊 BEAST • PORTFOLIO
 
-(No narrative input)
+Layer-1 Exposure: {layer1_exposure}%
+Enterprise (VET): {PORTFOLIO["VET"]}%
+
+(No market narratives)
 """
-    bot.send_message(chat_id=PORTFOLIO_CHAT_ID, text=msg)
+    bot.send_message(chat_id=PORTFOLIO_CHAT_ID, text=message)
 
 schedule.every(24).hours.do(portfolio_risk)
 
