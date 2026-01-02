@@ -1,22 +1,23 @@
 import os
 import requests
-import time
 from datetime import datetime, timezone
 
+# =========================
+# ENV
+# =========================
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 MARKET_CHAT_ID = os.environ["MARKET_CHAT_ID"]
 
 TG_URL = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
 
-# -------------------------
+# =========================
 # CONFIG
-# -------------------------
-VS_CURRENCY = "usd"
-TOP_N = 50
-PRICE_MOVE_STRONG = 15
-VOLUME_SURGE = 1.5
+# =========================
+VS = "usd"
+TOP_N = 100
+STRONG_MOVE = 15
+MODERATE_MOVE = 5
 
-# Narrative baskets (editable)
 NARRATIVES = {
     "AI / Compute": ["render-token", "fetch-ai", "bittensor"],
     "Privacy": ["zcash", "monero", "secret"],
@@ -26,60 +27,177 @@ NARRATIVES = {
     "RWA / Tokenization": ["ondo-finance", "chainlink"]
 }
 
-# -------------------------
+# =========================
 # HELPERS
-# -------------------------
-def cg_markets():
+# =========================
+def send(msg):
+    requests.post(
+        TG_URL,
+        data={
+            "chat_id": MARKET_CHAT_ID,
+            "text": msg,
+            "parse_mode": "HTML"
+        },
+        timeout=20
+    )
+
+def get_market():
     url = "https://api.coingecko.com/api/v3/coins/markets"
     params = {
-        "vs_currency": VS_CURRENCY,
+        "vs_currency": VS,
         "order": "market_cap_desc",
         "per_page": TOP_N,
         "page": 1,
         "price_change_percentage": "24h,7d"
     }
-    return requests.get(url, params=params, timeout=20).json()
+    return requests.get(url, params=params, timeout=30).json()
 
+# =========================
+# MACRO
+# =========================
 def btc_dominance(market):
-    btc = next((c for c in market if c["id"] == "bitcoin"), None)
-    total = sum(c.get("market_cap", 0) or 0 for c in market)
+    btc = None
+    total = 0
+
+    for c in market:
+        mc = c.get("market_cap") or 0
+        total += mc
+        if c.get("id") == "bitcoin":
+            btc = c
+
     if not btc or total == 0:
-        return None
-    return round((btc["market_cap"] / total) * 100, 2)
+        return None, None
 
-def send(msg):
-    requests.post(TG_URL, data={
-        "chat_id": MARKET_CHAT_ID,
-        "text": msg,
-        "parse_mode": "HTML"
-    })
+    dom = round((btc["market_cap"] / total) * 100, 2)
+    btc_24h = btc.get("price_change_percentage_24h") or 0
+    return dom, btc_24h
 
-# -------------------------
-# CORE LOGIC
-# -------------------------
+def macro_score(btc_dom, btc_24h):
+    score = 50
+
+    if btc_24h < -2:
+        score += 10
+    if btc_24h > 3:
+        score -= 5
+    if btc_dom and btc_dom > 52:
+        score -= 10
+    if btc_dom and btc_dom < 48:
+        score += 5
+
+    return max(0, min(100, score))
+
+# =========================
+# NARRATIVES
+# =========================
 def narrative_check(market, ids):
-    coins = [c for c in market if c["id"] in ids]
+    coins = [c for c in market if c.get("id") in ids]
 
     if not coins:
-        return "Data error", None, None
+        return "Data error", 0
 
-    movers = []
+    avg_7d = 0
+    count = 0
+
     for c in coins:
-        try:
-            if (c.get("price_change_percentage_7d_in_currency") or 0) > PRICE_MOVE_STRONG:
-                movers.append(c)
-        except:
-            pass
+        v = c.get("price_change_percentage_7d_in_currency")
+        if v is not None:
+            avg_7d += v
+            count += 1
 
-    avg_7d = sum((c.get("price_change_percentage_7d_in_currency") or 0) for c in coins) / len(coins)
-    avg_vol = sum((c.get("total_volume") or 0) for c in coins) / len(coins)
+    if count == 0:
+        return "Data error", 0
 
-    if avg_7d > 10:
+    avg_7d = avg_7d / count
+
+    if avg_7d >= STRONG_MOVE:
         strength = "Strong"
-    elif avg_7d > 3:
+    elif avg_7d >= MODERATE_MOVE:
         strength = "Moderate"
     else:
         strength = "Weak"
+
+    return strength, avg_7d
+
+def velocity_label(v):
+    if v >= 20:
+        return "🔥 Accelerating"
+    elif v >= 10:
+        return "⬆ Rising"
+    elif v >= 0:
+        return "➖ Flat"
+    else:
+        return "⬇ Cooling"
+
+# =========================
+# REPORT
+# =========================
+def market_report():
+    market = get_market()
+
+    now = datetime.now(timezone.utc).strftime("%d %b %Y | %H:%M UTC")
+
+    btc_dom, btc_24h = btc_dominance(market)
+    score = macro_score(btc_dom, btc_24h)
+
+    if score >= 65:
+        regime = "Risk-On"
+    elif score <= 35:
+        regime = "Risk-Off"
+    else:
+        regime = "Neutral"
+
+    msg = f"""
+<b>🧠 MARKET SNAPSHOT</b>
+🕒 {now}
+
+<b>Risk Regime:</b> {regime}
+<b>Macro Score:</b> {score}/100
+
+<b>BTC 24h:</b> {btc_24h:.2f}%
+<b>BTC Dominance:</b> {btc_dom}%
+"""
+
+    msg += "\n<b>Narratives</b>\n"
+
+    strengths = {}
+
+    for name, ids in NARRATIVES.items():
+        v, avg = narrative_check(market, ids)
+        strengths[name] = avg
+
+        if v == "Strong":
+            emoji = "🟢"
+        elif v == "Moderate":
+            emoji = "🟡"
+        else:
+            emoji = "🔴"
+
+        vel = velocity_label(avg)
+
+        msg += f"{emoji} <b>{name}</b>: {v} ({vel})\n"
+
+    # =========================
+    # ROTATION
+    # =========================
+    top = max(strengths, key=strengths.get)
+    bottom = min(strengths, key=strengths.get)
+
+    if strengths[top] - strengths[bottom] >= 15:
+        msg += f"\n🔁 <b>Rotation:</b> {bottom} ➜ {top}\n"
+
+    # =========================
+    # BTC CONFLICT
+    # =========================
+    if btc_24h > 2 and any(v > 8 for v in strengths.values()):
+        msg += "\n⚠️ <b>BTC dominance conflict:</b> Alts running with BTC\n"
+
+    send(msg.strip())
+
+# =========================
+# RUN
+# =========================
+if __name__ == "__main__":
+    market_report()        strength = "Weak"
 
     return strength, avg_7d, avg_vol
 
@@ -322,7 +440,12 @@ def market_report():
 # RUN
 # -----------------------------
 if __name__ == "__main__":
-    market_report()        emoji = "🟢" if v == "Strong" else "🟡" if v == "Moderate" else "🔴"
+  if v == "Strong":
+    emoji = "🟢"
+elif v == "Moderate":
+    emoji = "🟡"
+else:
+    emoji = "🔴"  market_report()        emoji = "🟢" if v == "Strong" else "🟡" if v == "Moderate" else "🔴"
         msg += f"\n{emoji} {k}: {v}"
 
     send(msg)
