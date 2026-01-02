@@ -1,8 +1,11 @@
+import os
 import requests
 import schedule
 import time
 from telegram import Bot
-from config import BOT_TOKEN, MARKET_CHAT_ID
+
+BOT_TOKEN = os.environ["BOT_TOKEN"]
+MARKET_CHAT_ID = os.environ["MARKET_CHAT_ID"]
 
 bot = Bot(BOT_TOKEN)
 
