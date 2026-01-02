@@ -1,12 +1,43 @@
-name: Scheduler Test
+name: Beast Bot
 
 on:
+  workflow_dispatch:
   schedule:
-    - cron: "*/1 * * * *"
+    - cron: "*/30 * * * *"
 
 jobs:
-  test:
+  run-bots:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Print time
-        run: date
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests python-telegram-bot schedule
+
+      - name: Run Market Bot
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          MARKET_CHAT_ID: ${{ secrets.MARKET_CHAT_ID }}
+        run: python market_bot.py
+
+      - name: Run Action Bot
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          ACTION_CHAT_ID: ${{ secrets.ACTION_CHAT_ID }}
+        run: python action_bot.py
+
+      - name: Run Portfolio Bot
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          PORTFOLIO_CHAT_ID: ${{ secrets.PORTFOLIO_CHAT_ID }}
+          PORTFOLIO_JSON: ${{ vars.PORTFOLIO_JSON }}
+        run: python portfolio_bot.py
