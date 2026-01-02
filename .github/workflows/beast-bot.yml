@@ -41,11 +41,3 @@ jobs:
           PORTFOLIO_CHAT_ID: ${{ secrets.PORTFOLIO_CHAT_ID }}
           PORTFOLIO_JSON: ${{ vars.PORTFOLIO_JSON }}
         run: python portfolio_bot.py
-
-      - name: Telegram Trigger Helper
-        if: github.event_name == 'workflow_dispatch'
-        env:
-          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-          ACTION_CHAT_ID: ${{ secrets.ACTION_CHAT_ID }}
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
-        run: python trigger_bot.py
