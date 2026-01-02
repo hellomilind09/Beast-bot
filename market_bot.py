@@ -2,39 +2,98 @@ import os
 import requests
 from datetime import datetime
 
-# ===== ENV =====
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 MARKET_CHAT_ID = os.environ["MARKET_CHAT_ID"]
 
-TG_URL = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-
+TG_URL = "https://api.telegram.org/bot" + BOT_TOKEN + "/sendMessage"
 CG_GLOBAL = "https://api.coingecko.com/api/v3/global"
 CG_MARKETS = "https://api.coingecko.com/api/v3/coins/markets"
 
-HEADERS = {"accept": "application/json"}
 
-# ===== HELPERS =====
-def send(msg):
+def send_message(text):
+    payload = {}
+    payload["chat_id"] = MARKET_CHAT_ID
+    payload["text"] = text
+    payload["parse_mode"] = "HTML"
+
     try:
-        requests.post(
-            TG_URL,
-            data={
-                "chat_id": MARKET_CHAT_ID,
-                "text": msg,
-                "parse_mode": "HTML"
-            },
-            timeout=20
-        )
+        requests.post(TG_URL, data=payload, timeout=20)
     except Exception as e:
         print("Telegram error:", e)
 
 
-def get_global():
+def get_global_data():
     r = requests.get(CG_GLOBAL, timeout=20)
     return r.json()["data"]
 
 
-def get_coins(category):
+def get_category(category):
+    params = {}
+    params["vs_currency"] = "usd"
+    params["category"] = category
+    params["order"] = "market_cap_desc"
+    params["per_page"] = 15
+    params["page"] = 1
+    params["price_change_percentage"] = "7d"
+
+    r = requests.get(CG_MARKETS, params=params, timeout=20)
+    return r.json()
+
+
+def analyze(category, label):
+    try:
+        coins = get_category(category)
+    except:
+        return "🔴 " + label + ": data error"
+
+    movers = []
+
+    for c in coins:
+        pct = c.get("price_change_percentage_7d")
+        if pct is not None and pct > 15:
+            movers.append(c["symbol"].upper() + " +" + str(round(pct, 1)) + "%")
+
+    if len(movers) == 0:
+        return "🟡 " + label + ": quiet"
+
+    return "🟢 " + label + ": " + ", ".join(movers[:4])
+
+
+def market_report():
+    now = datetime.utcnow().strftime("%d %b %Y | %H:%M UTC")
+    g = get_global_data()
+
+    btc_d = round(g["market_cap_percentage"]["btc"], 2)
+    eth_d = round(g["market_cap_percentage"]["eth"], 2)
+
+    if btc_d > 52:
+        risk = "Risk-Off"
+    elif btc_d < 48:
+        risk = "Risk-On"
+    else:
+        risk = "Neutral"
+
+    msg = ""
+    msg += "🧠 <b>MARKET SNAPSHOT</b>\n"
+    msg += "🕒 " + now + "\n\n"
+    msg += "<b>Risk Regime:</b> " + risk + "\n\n"
+    msg += "<b>Dominance</b>\n"
+    msg += "• BTC: " + str(btc_d) + "%\n"
+    msg += "• ETH: " + str(eth_d) + "%\n\n"
+    msg += "<b>Narratives</b>\n"
+
+    msg += analyze("artificial-intelligence", "AI / Compute") + "\n"
+    msg += analyze("real-world-assets", "RWA / Tokenization") + "\n"
+    msg += analyze("layer-2", "Layer 2s") + "\n"
+    msg += analyze("depin", "DePIN / Infra") + "\n"
+    msg += analyze("gaming", "Gaming") + "\n"
+    msg += analyze("privacy-coins", "Privacy")
+
+    send_message(msg)
+
+
+if __name__ == "__main__":
+    market_report()def get_coins(category):
     params = {
         "vs_currency": "usd",
         "category": category,
