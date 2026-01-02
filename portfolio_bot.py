@@ -1,172 +1,131 @@
 import os
+import json
 import requests
 from datetime import datetime
+from telegram import Bot
 
-# ================= CONFIG =================
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+CHAT_ID = os.getenv("PORTFOLIO_CHAT_ID")
+PORTFOLIO_JSON = os.getenv("PORTFOLIO_JSON")
 
-BOT_TOKEN = os.environ["BOT_TOKEN"]
-PORTFOLIO_CHAT_ID = os.environ["PORTFOLIO_CHAT_ID"]
+bot = Bot(token=BOT_TOKEN)
 
-PORTFOLIO_COINS = os.environ.get("PORTFOLIO_COINS", "")
-COINS = [c.strip().upper() for c in PORTFOLIO_COINS.split(",") if c.strip()]
+# -------------------------
+# DATA SOURCES
+# -------------------------
 
-WEIGHTS_RAW = os.environ.get("PORTFOLIO_WEIGHTS", "")
-WEIGHTS = {}
-for pair in WEIGHTS_RAW.split(","):
-    if ":" in pair:
-        k, v = pair.split(":")
-        WEIGHTS[k.strip().upper()] = float(v)
+def fetch_coingecko(coin_ids):
+    url = "https://api.coingecko.com/api/v3/coins/markets"
+    params = {
+        "vs_currency": "usd",
+        "ids": ",".join(coin_ids),
+        "price_change_percentage": "24h,7d"
+    }
+    r = requests.get(url, params=params, timeout=15)
+    if r.status_code != 200:
+        return None
+    data = r.json()
+    if not data:
+        return None
+    return {c["id"]: c for c in data}
 
-TG_URL = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-CG = "https://api.coingecko.com/api/v3"
 
-# 🔑 SYMBOL → COINGECKO ID MAP (CRITICAL)
-COIN_ID_MAP = {
-    "VET": "vechain",
-    "OP": "optimism",
-    "AVAX": "avalanche-2",
-    "NEAR": "near",
-    "AR": "arweave",
-    "MX": "mx-token"
-}
+def fetch_cryptocompare(symbols):
+    url = "https://min-api.cryptocompare.com/data/pricemultifull"
+    params = {
+        "fsyms": ",".join(symbols),
+        "tsyms": "USD"
+    }
+    r = requests.get(url, params=params, timeout=15)
+    if r.status_code != 200:
+        return None
+    data = r.json().get("RAW", {})
+    if not data:
+        return None
+    return data
 
-# Narrative mapping
-NARRATIVES = {
-    "VET": "Enterprise / Supply Chain",
-    "OP": "Layer 2s",
-    "AVAX": "Layer 1 / Infra",
-    "NEAR": "Layer 1 / AI-adjacent",
-    "AR": "Data / Storage",
-    "MX": "Exchange Token"
-}
 
-# ================= TELEGRAM =================
+# -------------------------
+# MAIN LOGIC
+# -------------------------
 
-def send(msg):
-    requests.post(
-        TG_URL,
-        json={
-            "chat_id": PORTFOLIO_CHAT_ID,
-            "text": msg,
-            "parse_mode": "HTML",
-            "disable_web_page_preview": True
-        },
-        timeout=20
-    )
-
-# ================= DATA =================
-
-def get_market_data():
-    ids = [COIN_ID_MAP[c] for c in COINS if c in COIN_ID_MAP]
-    if not ids:
-        return []
-
-    try:
-        r = requests.get(
-            f"{CG}/coins/markets",
-            params={
-                "vs_currency": "usd",
-                "ids": ",".join(ids),
-                "price_change_percentage": "24h,7d"
-            },
-            timeout=20
-        )
-        data = r.json()
-        if isinstance(data, list):
-            return data
-    except Exception:
-        pass
-
-    return []
-
-# ================= LOGIC =================
-
-def classify(p7d):
-    if p7d is None:
-        return "No Data"
-    if p7d >= 15:
-        return "Contributor"
-    if p7d <= -15:
-        return "Drag"
-    return "Neutral"
-
-# ================= REPORT =================
-
-def portfolio_report():
-    data = get_market_data()
+def run_portfolio_bot():
     now = datetime.utcnow().strftime("%d %b %Y | %H:%M UTC")
 
-    msg = []
-    msg.append("<b>📊 PORTFOLIO INTELLIGENCE</b>")
-    msg.append(f"🕒 {now}")
-    msg.append("")
-
-    if not data:
-        msg.append("⚠️ Portfolio data unavailable.")
-        msg.append("Check Coin IDs or API limits.")
-        send("\n".join(msg))
+    try:
+        portfolio = json.loads(PORTFOLIO_JSON)
+    except Exception:
+        bot.send_message(chat_id=CHAT_ID, text="⚠️ Invalid portfolio JSON.")
         return
 
-    contributors = []
-    drags = []
-    narrative_exposure = {}
+    coin_ids = list(portfolio.keys())
 
-    for c in data:
-        symbol = c.get("symbol", "").upper()
-        p24 = c.get("price_change_percentage_24h")
-        p7d = c.get("price_change_percentage_7d_in_currency")
+    # ---- Try CoinGecko first
+    cg_data = fetch_coingecko(coin_ids)
 
-        weight = WEIGHTS.get(symbol, 0)
-        status = classify(p7d)
+    use_fallback = False
+    if not cg_data:
+        use_fallback = True
 
-        msg.append(
-            f"<b>{symbol}</b> ({weight}%) | "
-            f"24h: {p24:.1f}% | 7d: {p7d:.1f}% → {status}"
+    # ---- Fallback to CryptoCompare
+    cc_data = None
+    if use_fallback:
+        symbol_map = {
+            "vechain": "VET",
+            "optimism": "OP",
+            "avalanche-2": "AVAX",
+            "near": "NEAR",
+            "arweave": "AR"
+        }
+        symbols = [symbol_map[c] for c in coin_ids if c in symbol_map]
+        cc_data = fetch_cryptocompare(symbols)
+
+        if not cc_data:
+            bot.send_message(
+                chat_id=CHAT_ID,
+                text=f"📊 PORTFOLIO INTELLIGENCE\n🕒 {now}\n\n⚠️ All market data sources unavailable."
+            )
+            return
+
+    # -------------------------
+    # BUILD REPORT
+    # -------------------------
+
+    lines = [
+        "📊 PORTFOLIO INTELLIGENCE",
+        f"🕒 {now}",
+        "",
+        "📦 Allocation Overview"
+    ]
+
+    for coin, weight in portfolio.items():
+        if not use_fallback:
+            price = cg_data[coin]["current_price"]
+            chg = cg_data[coin].get("price_change_percentage_24h", 0)
+        else:
+            sym = symbol_map[coin]
+            raw = cc_data[sym]["USD"]
+            price = raw["PRICE"]
+            chg = raw["CHANGEPCT24HOUR"]
+
+        lines.append(
+            f"• {coin.upper():<10} {weight:.1f}% | ${price:.2f} | {chg:+.2f}% (24h)"
         )
 
-        if status == "Contributor":
-            contributors.append(symbol)
-        elif status == "Drag":
-            drags.append(symbol)
+    # -------------------------
+    # STRATEGIC INSIGHT
+    # -------------------------
 
-        narrative = NARRATIVES.get(symbol, "Other")
-        narrative_exposure[narrative] = narrative_exposure.get(narrative, 0) + weight
+    lines += [
+        "",
+        "🧠 STRATEGY VIEW",
+        "• Short-term: Volatility-driven, watch BTC correlation",
+        "• Mid-term: Infra + L1 heavy — rotation dependent",
+        "• Long-term: Strong fundamental exposure, but concentration risk on VET"
+    ]
 
-    # ===== SUMMARY =====
-    msg.append("")
-    msg.append("<b>SUMMARY</b>")
+    bot.send_message(chat_id=CHAT_ID, text="\n".join(lines))
 
-    if contributors:
-        msg.append("🟢 Contributors: " + ", ".join(contributors))
-    if drags:
-        msg.append("🔴 Drags: " + ", ".join(drags))
-    if not contributors and not drags:
-        msg.append("Portfolio broadly neutral.")
-
-    # ===== RISK =====
-    msg.append("")
-    msg.append("<b>RISK CHECK</b>")
-
-    high_exposure = [k for k, v in WEIGHTS.items() if v >= 25]
-    if high_exposure:
-        msg.append("⚠️ High single-coin exposure: " + ", ".join(high_exposure))
-
-    if len(drags) >= max(2, len(COINS)//2):
-        msg.append("⚠️ Multiple holdings dragging simultaneously")
-
-    # ===== NARRATIVES =====
-    msg.append("")
-    msg.append("<b>NARRATIVE EXPOSURE</b>")
-    for n, v in narrative_exposure.items():
-        msg.append(f"• {n}: {round(v,1)}%")
-
-    dominant = [n for n, v in narrative_exposure.items() if v >= 50]
-    if dominant:
-        msg.append("⚠️ Overexposed to narrative: " + ", ".join(dominant))
-
-    send("\n".join(msg))
-
-# ================= RUN =================
 
 if __name__ == "__main__":
-    portfolio_report()
+    run_portfolio_bot()
