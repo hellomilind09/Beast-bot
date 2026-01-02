@@ -50,3 +50,20 @@ jobs:
           PORTFOLIO_CHAT_ID: ${{ secrets.PORTFOLIO_CHAT_ID }}
           PORTFOLIO_JSON: ${{ vars.PORTFOLIO_JSON }}
         run: python portfolio_bot.py
+
+trigger-bot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - run: pip install python-telegram-bot requests
+
+      - name: Run Telegram Trigger Bot
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: python trigger_bot.py
