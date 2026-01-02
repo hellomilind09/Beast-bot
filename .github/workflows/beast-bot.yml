@@ -3,6 +3,11 @@ name: Beast Bot
 on:
   push:
   workflow_dispatch:
+    inputs:
+      mode:
+        description: "Which bot to run (market | action | portfolio | all)"
+        required: false
+        default: "all"
   schedule:
     - cron: "*/30 * * * *"
 
@@ -24,21 +29,28 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests python-telegram-bot schedule
 
-      - name: Run Market Bot
+      - name: Run Selected Bots
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           MARKET_CHAT_ID: ${{ secrets.MARKET_CHAT_ID }}
-        run: python market_bot.py
-
-      - name: Run Action Bot
-        env:
-          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           ACTION_CHAT_ID: ${{ secrets.ACTION_CHAT_ID }}
-        run: python action_bot.py
-
-      - name: Run Portfolio Bot
-        env:
-          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           PORTFOLIO_CHAT_ID: ${{ secrets.PORTFOLIO_CHAT_ID }}
           PORTFOLIO_JSON: ${{ vars.PORTFOLIO_JSON }}
-        run: python portfolio_bot.py
+        run: |
+          MODE="${{ github.event.inputs.mode }}"
+          echo "Running mode: $MODE"
+
+          if [ "$MODE" = "market" ]; then
+            python market_bot.py
+
+          elif [ "$MODE" = "action" ]; then
+            python action_bot.py
+
+          elif [ "$MODE" = "portfolio" ]; then
+            python portfolio_bot.py
+
+          else
+            python market_bot.py
+            python action_bot.py
+            python portfolio_bot.py
+          fi
