@@ -15,6 +15,7 @@ TG_URL = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
 # =========================
 VS = "usd"
 TOP_N = 100
+
 STRONG_MOVE = 15
 MODERATE_MOVE = 5
 
@@ -28,13 +29,171 @@ NARRATIVES = {
 }
 
 # =========================
-# HELPERS
+# TELEGRAM
 # =========================
 def send(msg):
     requests.post(
         TG_URL,
         data={
             "chat_id": MARKET_CHAT_ID,
+            "text": msg,
+            "parse_mode": "HTML"
+        },
+        timeout=20
+    )
+
+# =========================
+# DATA
+# =========================
+def get_market():
+    url = "https://api.coingecko.com/api/v3/coins/markets"
+    params = {
+        "vs_currency": VS,
+        "order": "market_cap_desc",
+        "per_page": TOP_N,
+        "page": 1,
+        "price_change_percentage": "24h,7d"
+    }
+    return requests.get(url, params=params, timeout=30).json()
+
+# =========================
+# MACRO
+# =========================
+def btc_metrics(market):
+    total_mc = 0
+    btc_mc = 0
+    btc_24h = 0
+
+    for c in market:
+        mc = c.get("market_cap") or 0
+        total_mc += mc
+
+        if c.get("id") == "bitcoin":
+            btc_mc = mc
+            btc_24h = c.get("price_change_percentage_24h") or 0
+
+    if total_mc == 0:
+        return None, None
+
+    dominance = round((btc_mc / total_mc) * 100, 2)
+    return dominance, btc_24h
+
+def macro_score(btc_dom, btc_24h):
+    score = 50
+
+    if btc_24h < -2:
+        score += 10
+    if btc_24h > 3:
+        score -= 5
+    if btc_dom is not None and btc_dom > 52:
+        score -= 10
+    if btc_dom is not None and btc_dom < 48:
+        score += 5
+
+    return max(0, min(100, score))
+
+# =========================
+# NARRATIVES
+# =========================
+def narrative_check(market, ids):
+    changes = []
+
+    for c in market:
+        if c.get("id") in ids:
+            v = c.get("price_change_percentage_7d_in_currency")
+            if v is not None:
+                changes.append(v)
+
+    if not changes:
+        return "Data error", 0
+
+    avg = sum(changes) / len(changes)
+
+    if avg >= STRONG_MOVE:
+        strength = "Strong"
+    elif avg >= MODERATE_MOVE:
+        strength = "Moderate"
+    else:
+        strength = "Weak"
+
+    return strength, avg
+
+def velocity_label(v):
+    if v >= 20:
+        return "🔥 Accelerating"
+    if v >= 10:
+        return "⬆ Rising"
+    if v >= 0:
+        return "➖ Flat"
+    return "⬇ Cooling"
+
+# =========================
+# REPORT
+# =========================
+def market_report():
+    market = get_market()
+
+    now = datetime.now(timezone.utc).strftime("%d %b %Y | %H:%M UTC")
+
+    btc_dom, btc_24h = btc_metrics(market)
+    score = macro_score(btc_dom, btc_24h)
+
+    if score >= 65:
+        regime = "Risk-On"
+    elif score <= 35:
+        regime = "Risk-Off"
+    else:
+        regime = "Neutral"
+
+    msg = (
+        f"<b>🧠 MARKET SNAPSHOT</b>\n"
+        f"🕒 {now}\n\n"
+        f"<b>Risk Regime:</b> {regime}\n"
+        f"<b>Macro Score:</b> {score}/100\n\n"
+        f"<b>BTC 24h:</b> {btc_24h:.2f}%\n"
+        f"<b>BTC Dominance:</b> {btc_dom}%\n\n"
+        f"<b>Narratives</b>\n"
+    )
+
+    strengths = {}
+
+    for name, ids in NARRATIVES.items():
+        strength, avg = narrative_check(market, ids)
+        strengths[name] = avg
+
+        if strength == "Strong":
+            emoji = "🟢"
+        elif strength == "Moderate":
+            emoji = "🟡"
+        else:
+            emoji = "🔴"
+
+        vel = velocity_label(avg)
+
+        msg += f"{emoji} <b>{name}</b>: {strength} ({vel})\n"
+
+    # =========================
+    # ROTATION
+    # =========================
+    strongest = max(strengths, key=strengths.get)
+    weakest = min(strengths, key=strengths.get)
+
+    if strengths[strongest] - strengths[weakest] >= 15:
+        msg += f"\n🔁 <b>Rotation:</b> {weakest} ➜ {strongest}\n"
+
+    # =========================
+    # BTC CONFLICT
+    # =========================
+    if btc_24h > 2 and any(v > 8 for v in strengths.values()):
+        msg += "\n⚠️ <b>BTC dominance conflict:</b> Alts running with BTC\n"
+
+    send(msg.strip())
+
+# =========================
+# RUN
+# =========================
+if __name__ == "__main__":
+    market_report()            "chat_id": MARKET_CHAT_ID,
             "text": msg,
             "parse_mode": "HTML"
         },
