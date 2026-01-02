@@ -3,11 +3,20 @@ import json
 import requests
 from datetime import datetime, timedelta
 
+# ================= CONFIG =================
+
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 ACTION_CHAT_ID = os.environ["ACTION_CHAT_ID"]
 
 PORTFOLIO_COINS = os.environ.get("PORTFOLIO_COINS", "")
 PORTFOLIO = [c.strip().upper() for c in PORTFOLIO_COINS.split(",") if c.strip()]
+
+PORTFOLIO_WEIGHTS_RAW = os.environ.get("PORTFOLIO_WEIGHTS", "")
+PORTFOLIO_WEIGHTS = {}
+for pair in PORTFOLIO_WEIGHTS_RAW.split(","):
+    if ":" in pair:
+        k, v = pair.split(":")
+        PORTFOLIO_WEIGHTS[k.strip().upper()] = float(v)
 
 TG_URL = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
 STATE_FILE = "action_state.json"
@@ -16,6 +25,7 @@ COINGECKO = "https://api.coingecko.com/api/v3"
 COOLDOWN_HOURS = 6
 
 # ================= STATE =================
+
 def load_state():
     try:
         with open(STATE_FILE, "r") as f:
@@ -28,6 +38,7 @@ def save_state(state):
         json.dump(state, f)
 
 # ================= TELEGRAM =================
+
 def send(msg):
     requests.post(
         TG_URL,
@@ -41,6 +52,7 @@ def send(msg):
     )
 
 # ================= DATA =================
+
 def get_markets():
     try:
         r = requests.get(
@@ -61,7 +73,8 @@ def get_markets():
         pass
     return []
 
-# ================= LOGIC =================
+# ================= HELPERS =================
+
 def in_cooldown(symbol, state):
     last = state.get(symbol)
     if not last:
@@ -71,33 +84,18 @@ def in_cooldown(symbol, state):
 def mark_alerted(symbol, state):
     state[symbol] = datetime.utcnow().isoformat()
 
-def portfolio_relevance(symbol):
-    if symbol in PORTFOLIO:
-        return "🔥 HIGH", "Direct holding in portfolio"
+def high_exposure(symbol, threshold=25):
+    return PORTFOLIO_WEIGHTS.get(symbol, 0) >= threshold
 
-    # narrative proximity (simple heuristic)
-    narrative_links = {
-        "AVAX": ["NEAR", "SOL"],
-        "NEAR": ["AVAX"],
-        "OP": ["ARB"],
-        "VET": ["IOTA"],
-        "AR": ["FIL"]
-    }
-
-    for held in PORTFOLIO:
-        if symbol in narrative_links.get(held, []):
-            return "🟡 MEDIUM", f"Related to {held} narrative"
-
-    return "⚪ LOW", "No portfolio exposure"
-
-def impulse(p24):
+def impulse_quality(p24):
     if p24 >= 40:
         return "Very fast impulse"
     if p24 >= 25:
         return "Fast expansion"
     return "Gradual move"
 
-# ================= ACTION DETECTION =================
+# ================= CORE LOGIC =================
+
 def detect_actions(coins, state):
     alerts = []
 
@@ -114,29 +112,58 @@ def detect_actions(coins, state):
         vol = c.get("total_volume")
         mc = c.get("market_cap")
 
+        # ---------- SAFETY ----------
         if p24 is None or vol is None or mc is None:
             continue
 
-        if p24 < 25 and (p7d is None or p7d < 60):
+        # =====================================================
+        # 1️⃣ GLOBAL ANOMALY ALERT
+        # =====================================================
+        if p24 >= 25 or (p7d is not None and p7d >= 60):
+            msg = []
+            msg.append(f"<b>{symbol}</b> anomaly detected")
+            msg.append(f"Move: +{p24:.1f}% (24h)")
+            msg.append(f"Impulse: {impulse_quality(p24)}")
+            msg.append("Volume: Confirmed" if vol / mc > 0.1 else "Volume: Weak")
+
+            relevance = "🔥 HIGH" if symbol in PORTFOLIO else "⚪ LOW"
+            msg.append("")
+            msg.append(f"<b>Portfolio Relevance:</b> {relevance}")
+
+            alerts.append("\n".join(msg))
+            mark_alerted(symbol, state)
             continue
 
-        relevance, reason = portfolio_relevance(symbol)
+        # =====================================================
+        # 2️⃣ PORTFOLIO EXPOSURE + WEAKNESS ALERT
+        # =====================================================
+        if symbol in PORTFOLIO and high_exposure(symbol):
+            weak_24h = p24 <= -8
+            weak_7d = p7d is not None and p7d <= -15
 
-        msg = []
-        msg.append(f"<b>{symbol}</b> anomaly detected")
-        msg.append(f"Move: +{p24:.1f}% (24h)")
-        msg.append(f"Impulse: {impulse(p24)}")
-        msg.append("Volume: Confirmed" if vol/mc > 0.1 else "Volume: Weak")
-        msg.append("")
-        msg.append(f"<b>Portfolio Relevance:</b> {relevance}")
-        msg.append(f"Reason: {reason}")
+            if weak_24h or weak_7d:
+                msg = []
+                msg.append(f"<b>{symbol}</b> weakness detected")
+                if weak_24h:
+                    msg.append(f"Move: {p24:.1f}% (24h)")
+                else:
+                    msg.append(f"Move: {p7d:.1f}% (7d)")
+                msg.append(f"Exposure: {PORTFOLIO_WEIGHTS[symbol]}% (High)")
+                msg.append("")
+                msg.append("Context:")
+                msg.append("High-conviction position showing abnormal weakness.")
+                msg.append("Not a market-wide signal.")
+                msg.append("")
+                msg.append("Action:")
+                msg.append("Risk awareness required (no forced action)")
 
-        alerts.append("\n".join(msg))
-        mark_alerted(symbol, state)
+                alerts.append("\n".join(msg))
+                mark_alerted(symbol, state)
 
     return alerts
 
 # ================= RUN =================
+
 def action_report():
     coins = get_markets()
     state = load_state()
