@@ -36,9 +36,8 @@ jobs:
         run: python action_bot.py
 
       - name: Run Portfolio Bot
-        env:
-          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-          PORTFOLIO_CHAT_ID: ${{ secrets.PORTFOLIO_CHAT_ID }}
-          PORTFOLIO_COINS: ${{ vars.PORTFOLIO_COINS }}
-          PORTFOLIO_WEIGHTS: ${{ vars.PORTFOLIO_WEIGHTS }}
-        run: python portfolio_bot.py
+  env:
+    BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+    PORTFOLIO_CHAT_ID: ${{ secrets.PORTFOLIO_CHAT_ID }}
+    PORTFOLIO_JSON: ${{ vars.PORTFOLIO_JSON }}
+  run: python portfolio_bot.py
