@@ -29,8 +29,5 @@ Enterprise (VET): {PORTFOLIO["VET"]}%
 """
     bot.send_message(chat_id=PORTFOLIO_CHAT_ID, text=message)
 
-schedule.every(24).hours.do(portfolio_risk)
-
-while True:
-    schedule.run_pending()
-    time.sleep(60)
+if __name__ == "__main__":
+    portfolio_risk()
