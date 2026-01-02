@@ -1,158 +1,198 @@
 import os
 import requests
-from datetime import datetime
+from datetime import datetime, timezone
 
-# ================= ENV =================
+# =========================
+# CONFIG
+# =========================
+
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 MARKET_CHAT_ID = os.environ["MARKET_CHAT_ID"]
 
-TG_URL = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-CG = "https://api.coingecko.com/api/v3"
+COINGECKO = "https://api.coingecko.com/api/v3"
 
+HEADERS = {"accept": "application/json"}
 
-# ================= TELEGRAM =================
-def send_message(text):
+# Narrative buckets (used only for grouping, NOT filtering)
+NARRATIVES = {
+    "AI / Compute": ["render-token", "fetch-ai", "akash-network"],
+    "Layer 2s": ["arbitrum", "optimism", "polygon"],
+    "Gaming": ["immutable-x", "gala", "sandbox"],
+    "Privacy": ["zcash", "monero"],
+    "Infra": ["chainlink", "filecoin"],
+    "Memes": ["dogecoin", "pepe"]
+}
+
+# =========================
+# HELPERS
+# =========================
+
+def send_telegram(text):
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     payload = {
         "chat_id": MARKET_CHAT_ID,
         "text": text,
-        "parse_mode": "HTML",
-        "disable_web_page_preview": True
+        "parse_mode": "Markdown"
     }
-    requests.post(TG_URL, data=payload, timeout=20)
+    requests.post(url, json=payload, timeout=20)
 
 
-# ================= DATA =================
 def get_global():
-    r = requests.get(f"{CG}/global", timeout=20)
+    r = requests.get(f"{COINGECKO}/global", headers=HEADERS, timeout=20)
     return r.json()["data"]
 
 
-def get_categories():
-    r = requests.get(f"{CG}/coins/categories", timeout=20)
+def get_markets(ids):
+    if not ids:
+        return []
+    r = requests.get(
+        f"{COINGECKO}/coins/markets",
+        headers=HEADERS,
+        params={
+            "vs_currency": "usd",
+            "ids": ",".join(ids),
+            "price_change_percentage": "7d",
+        },
+        timeout=20
+    )
     return r.json()
 
 
-def get_category_coins(cat_id):
-    params = {
-        "vs_currency": "usd",
-        "category": cat_id,
-        "order": "market_cap_desc",
-        "per_page": 10,
-        "page": 1,
-        "price_change_percentage": "7d"
-    }
-    r = requests.get(f"{CG}/coins/markets", params=params, timeout=20)
-    return r.json()
+# =========================
+# ANALYSIS LOGIC
+# =========================
 
+def macro_analysis(global_data):
+    btc_d = global_data["market_cap_percentage"]["btc"]
+    eth_d = global_data["market_cap_percentage"]["eth"]
 
-# ================= MACRO =================
-def macro_view():
-    g = get_global()
-    btc_d = round(g["market_cap_percentage"].get("btc", 0), 2)
-    eth_d = round(g["market_cap_percentage"].get("eth", 0), 2)
-
-    if btc_d > 52:
+    if btc_d > 55:
         regime = "Risk-Off"
         score = 35
-    elif btc_d < 48:
-        regime = "Risk-On"
-        score = 70
-    else:
+    elif btc_d > 48:
         regime = "Neutral"
         score = 50
+    else:
+        regime = "Risk-On"
+        score = 70
 
-    return btc_d, eth_d, regime, score
+    explanation = (
+        "Capital concentrated in BTC. Alt rallies fragile."
+        if regime == "Risk-Off"
+        else "Balanced conditions. Selective opportunities."
+        if regime == "Neutral"
+        else "Broad alt participation likely."
+    )
+
+    return btc_d, eth_d, regime, score, explanation
 
 
-# ================= NARRATIVE =================
-def analyze_category(cat):
-    coins = get_category_coins(cat["id"])
-
+def analyze_narrative(name, ids):
+    coins = get_markets(ids)
     movers = []
-    changes = []
+    avg_move = 0
 
     for c in coins:
-        # 🔒 HARD GUARD (THIS FIXES YOUR CRASH)
-        if not isinstance(c, dict):
-            continue
-
-        pct = c.get("price_change_percentage_7d")
+        pct = c.get("price_change_percentage_7d_in_currency")
         if pct is None:
             continue
+        avg_move += pct
+        if pct >= 30:
+            movers.append((c["symbol"].upper(), pct))
 
-        changes.append(pct)
+    count = len(coins)
+    avg = avg_move / count if count else 0
 
-        if pct >= 15:
-            symbol = c.get("symbol", "").upper()
-            movers.append(f"{symbol} +{round(pct,1)}%")
-
-    if not changes:
-        return None
-
-    avg = sum(changes) / len(changes)
-
-    if avg >= 15:
-        strength = "🟢 HOT"
-    elif avg >= 7:
-        strength = "🟡 WARM"
+    if avg > 20:
+        strength = "Strong"
+    elif avg > 8:
+        strength = "Moderate"
     else:
-        strength = "🔴 COOL"
+        strength = "Weak"
 
-    return {
-        "name": cat.get("name", "Unknown"),
-        "avg": round(avg, 1),
-        "strength": strength,
-        "movers": movers[:4]
-    }
+    return strength, avg, movers
 
 
-# ================= REPORT =================
+def detect_anomalies():
+    # Top 250 coins scan for extreme moves
+    r = requests.get(
+        f"{COINGECKO}/coins/markets",
+        headers=HEADERS,
+        params={
+            "vs_currency": "usd",
+            "order": "market_cap_desc",
+            "per_page": 250,
+            "page": 1,
+            "price_change_percentage": "7d",
+        },
+        timeout=20
+    )
+
+    anomalies = []
+    for c in r.json():
+        pct = c.get("price_change_percentage_7d_in_currency")
+        if pct and pct >= 60:
+            anomalies.append((c["symbol"].upper(), pct))
+
+    return anomalies
+
+
+# =========================
+# REPORT
+# =========================
+
 def market_report():
-    now = datetime.utcnow().strftime("%d %b %Y | %H:%M UTC")
+    global_data = get_global()
+    btc_d, eth_d, regime, score, macro_text = macro_analysis(global_data)
 
-    btc_d, eth_d, regime, score = macro_view()
-    categories = get_categories()
+    now = datetime.now(timezone.utc).strftime("%d %b %Y | %H:%M UTC")
 
-    lines = []
-    lines.append("🧠 <b>MARKET SNAPSHOT</b>")
-    lines.append(f"🕒 {now}")
-    lines.append("")
-    lines.append("<b>MACRO</b>")
-    lines.append(f"• BTC Dominance: {btc_d}%")
-    lines.append(f"• ETH Dominance: {eth_d}%")
-    lines.append(f"• Regime: {regime}")
-    lines.append(f"• Macro Score: {score}/100")
-    lines.append("")
-    lines.append("<b>ACTIVE NARRATIVES</b>")
+    message = []
+    message.append("🧠 *MARKET SNAPSHOT*")
+    message.append(f"🕒 {now}")
+    message.append("")
+    message.append("*MACRO OVERVIEW*")
+    message.append(f"• BTC Dominance: {btc_d:.2f}%")
+    message.append(f"• ETH Dominance: {eth_d:.2f}%")
+    message.append(f"• Regime: {regime}")
+    message.append(f"• Macro Score: {score}/100")
+    message.append(f"_Interpretation_: {macro_text}")
+    message.append("")
 
-    shown = 0
+    message.append("*NARRATIVE HEALTH*")
+    active = False
 
-    for cat in categories:
-        info = analyze_category(cat)
-        if not info:
-            continue
-        if info["strength"] == "🔴 COOL":
-            continue
+    for name, ids in NARRATIVES.items():
+        strength, avg, movers = analyze_narrative(name, ids)
 
-        lines.append("")
-        lines.append(
-            f'{info["strength"]} <b>{info["name"]}</b> (avg {info["avg"]}%)'
-        )
+        if strength != "Weak":
+            active = True
+            message.append(f"• {name}: *{strength}* ({avg:.1f}% avg)")
 
-        for m in info["movers"]:
-            lines.append(f"• {m}")
+            for m in movers:
+                message.append(f"   ↳ {m[0]} +{m[1]:.1f}%")
 
-        shown += 1
-        if shown >= 8:
-            break
+    if not active:
+        message.append("No strong narrative momentum right now.")
 
-    if shown == 0:
-        lines.append("")
-        lines.append("No strong narrative momentum right now.")
+    message.append("")
 
-    send_message("\n".join(lines))
+    anomalies = detect_anomalies()
+    if anomalies:
+        message.append("*SINGLE-COIN ANOMALIES ⚠️*")
+        for a in anomalies[:5]:
+            message.append(f"• {a[0]} +{a[1]:.1f}% (7D)")
+        message.append("")
+
+    if btc_d > 55:
+        message.append("⚠️ *BTC Dominance High* — alt moves likely unstable")
+
+    send_telegram("\n".join(message))
 
 
-# ================= RUN =================
+# =========================
+# ENTRY
+# =========================
+
 if __name__ == "__main__":
     market_report()
