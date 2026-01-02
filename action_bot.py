@@ -28,8 +28,5 @@ Rotate PARTIAL Layer-1 → AI
 """
         bot.send_message(chat_id=ACTION_CHAT_ID, text=message)
 
-schedule.every(6).hours.do(decision_engine)
-
-while True:
-    schedule.run_pending()
-    time.sleep(60)
+if __name__ == "__main__":
+    decision_engine()
