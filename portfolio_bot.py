@@ -20,13 +20,23 @@ for pair in WEIGHTS_RAW.split(","):
 TG_URL = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
 CG = "https://api.coingecko.com/api/v3"
 
-# Narrative mapping (extendable)
+# 🔑 SYMBOL → COINGECKO ID MAP (CRITICAL)
+COIN_ID_MAP = {
+    "VET": "vechain",
+    "OP": "optimism",
+    "AVAX": "avalanche-2",
+    "NEAR": "near",
+    "AR": "arweave",
+    "MX": "mx-token"
+}
+
+# Narrative mapping
 NARRATIVES = {
     "VET": "Enterprise / Supply Chain",
     "OP": "Layer 2s",
     "AVAX": "Layer 1 / Infra",
     "NEAR": "Layer 1 / AI-adjacent",
-    "AR": "Data / Storage (AI Infra)",
+    "AR": "Data / Storage",
     "MX": "Exchange Token"
 }
 
@@ -47,12 +57,16 @@ def send(msg):
 # ================= DATA =================
 
 def get_market_data():
+    ids = [COIN_ID_MAP[c] for c in COINS if c in COIN_ID_MAP]
+    if not ids:
+        return []
+
     try:
         r = requests.get(
             f"{CG}/coins/markets",
             params={
                 "vs_currency": "usd",
-                "symbols": ",".join([c.lower() for c in COINS]),
+                "ids": ",".join(ids),
                 "price_change_percentage": "24h,7d"
             },
             timeout=20
@@ -62,6 +76,7 @@ def get_market_data():
             return data
     except Exception:
         pass
+
     return []
 
 # ================= LOGIC =================
@@ -87,7 +102,8 @@ def portfolio_report():
     msg.append("")
 
     if not data:
-        msg.append("No portfolio data available.")
+        msg.append("⚠️ Portfolio data unavailable.")
+        msg.append("Check Coin IDs or API limits.")
         send("\n".join(msg))
         return
 
@@ -103,22 +119,20 @@ def portfolio_report():
         weight = WEIGHTS.get(symbol, 0)
         status = classify(p7d)
 
-        line = (
+        msg.append(
             f"<b>{symbol}</b> ({weight}%) | "
             f"24h: {p24:.1f}% | 7d: {p7d:.1f}% → {status}"
         )
-        msg.append(line)
 
         if status == "Contributor":
             contributors.append(symbol)
-        if status == "Drag":
+        elif status == "Drag":
             drags.append(symbol)
 
         narrative = NARRATIVES.get(symbol, "Other")
         narrative_exposure[narrative] = narrative_exposure.get(narrative, 0) + weight
 
-    # ================= SUMMARY =================
-
+    # ===== SUMMARY =====
     msg.append("")
     msg.append("<b>SUMMARY</b>")
 
@@ -129,20 +143,18 @@ def portfolio_report():
     if not contributors and not drags:
         msg.append("Portfolio broadly neutral.")
 
-    # ================= RISK CHECK =================
-
+    # ===== RISK =====
     msg.append("")
     msg.append("<b>RISK CHECK</b>")
 
-    high_exposure = [s for s, w in WEIGHTS.items() if w >= 25]
+    high_exposure = [k for k, v in WEIGHTS.items() if v >= 25]
     if high_exposure:
         msg.append("⚠️ High single-coin exposure: " + ", ".join(high_exposure))
 
     if len(drags) >= max(2, len(COINS)//2):
-        msg.append("⚠️ Multiple positions dragging simultaneously")
+        msg.append("⚠️ Multiple holdings dragging simultaneously")
 
-    # ================= NARRATIVE EXPOSURE =================
-
+    # ===== NARRATIVES =====
     msg.append("")
     msg.append("<b>NARRATIVE EXPOSURE</b>")
     for n, v in narrative_exposure.items():
