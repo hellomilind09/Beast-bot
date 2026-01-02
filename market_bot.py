@@ -1,17 +1,19 @@
 import os
 import requests
-import time
 from datetime import datetime
 
-# ================== ENV ==================
+# ===== ENV =====
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 MARKET_CHAT_ID = os.environ["MARKET_CHAT_ID"]
 
 TG_URL = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
 
-COINGECKO = "https://api.coingecko.com/api/v3"
+CG_GLOBAL = "https://api.coingecko.com/api/v3/global"
+CG_MARKETS = "https://api.coingecko.com/api/v3/coins/markets"
 
-# ================== TELEGRAM ==================
+HEADERS = {"accept": "application/json"}
+
+# ===== HELPERS =====
 def send(msg):
     try:
         requests.post(
@@ -26,15 +28,85 @@ def send(msg):
     except Exception as e:
         print("Telegram error:", e)
 
-# ================== DATA ==================
-def get_top_coins():
-    url = f"{COINGECKO}/coins/markets"
+
+def get_global():
+    r = requests.get(CG_GLOBAL, timeout=20)
+    return r.json()["data"]
+
+
+def get_coins(category):
     params = {
         "vs_currency": "usd",
+        "category": category,
         "order": "market_cap_desc",
-        "per_page": 200,
+        "per_page": 20,
         "page": 1,
-        "price_change_percentage": "24h,7d"
+        "price_change_percentage": "7d"
+    }
+    r = requests.get(CG_MARKETS, params=params, timeout=20)
+    return r.json()
+
+
+# ===== LOGIC =====
+def analyze_narrative(name, category):
+    try:
+        coins = get_coins(category)
+    except:
+        return f"🔴 {name}: Data error"
+
+    movers = []
+    for c in coins:
+        pct = c.get("price_change_percentage_7d")
+        if pct and pct > 15:
+            movers.append(f"{c['symbol'].upper()} +{pct:.1f}%")
+
+    if not movers:
+        return f"🟡 {name}: Quiet / no momentum"
+
+    return f"🟢 {name}: " + ", ".join(movers[:4])
+
+
+def market_report():
+    now = datetime.utcnow().strftime("%d %b %Y | %H:%M UTC")
+
+    global_data = get_global()
+
+    btc_d = global_data["market_cap_percentage"]["btc"]
+    eth_d = global_data["market_cap_percentage"]["eth"]
+
+    if btc_d > 52:
+        risk = "Risk-Off"
+    elif btc_d < 48:
+        risk = "Risk-On"
+    else:
+        risk = "Neutral"
+
+    msg = f"""
+🧠 <b>MARKET SNAPSHOT</b>
+🕒 {now}
+
+<b>Risk Regime:</b> {risk}
+
+<b>Dominance</b>
+• BTC: {btc_d:.2f}%
+• ETH: {eth_d:.2f}%
+
+<b>Narrative Movers</b>
+"""
+
+    msg += "\n" + analyze_narrative("AI / Compute", "artificial-intelligence")
+    msg += "\n" + analyze_narrative("RWA / Tokenization", "real-world-assets")
+    msg += "\n" + analyze_narrative("Layer 2s", "layer-2")
+    msg += "\n" + analyze_narrative("DePIN / Infra", "depin")
+    msg += "\n" + analyze_narrative("Gaming", "gaming")
+    msg += "\n" + analyze_narrative("Privacy", "privacy-coins")
+
+    send(msg.strip())
+
+
+# ===== RUN =====
+if __name__ == "__main__":
+    market_report()        "price_change_percentage": "24h,7d"
     }
     r = requests.get(url, params=params, timeout=20)
     return r.json()
