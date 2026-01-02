@@ -1,9 +1,9 @@
-name: Beast Market Bot
+name: Beast Bots Runner
 
 on:
   workflow_dispatch:
   schedule:
-  - cron: "3 * * * *"
+    - cron: "0 */3 * * *"
 
 jobs:
   run-bots:
@@ -11,43 +11,34 @@ jobs:
 
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version: "3.11"
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests python-telegram-bot schedule
 
-      - name: Run Portfolio Bot
-  env:
-    BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-    PORTFOLIO_CHAT_ID: ${{ secrets.PORTFOLIO_CHAT_ID }}
-    PORTFOLIO_COINS: ${{ vars.PORTFOLIO_COINS }}
-    PORTFOLIO_WEIGHTS: ${{ vars.PORTFOLIO_WEIGHTS }}
-  run: python portfolio_bot.py
-
-      - name: Run Portfolio Bot
+      - name: Run Market Bot
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-          PORTFOLIO_CHAT_ID: ${{ secrets.PORTFOLIO_CHAT_ID }}
-        run: python portfolio_bot.py
+          MARKET_CHAT_ID: ${{ secrets.MARKET_CHAT_ID }}
+        run: python market_bot.py
 
       - name: Run Action Bot
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           ACTION_CHAT_ID: ${{ secrets.ACTION_CHAT_ID }}
-          MARKET_CHAT_ID: ${{ secrets.MARKET_CHAT_ID }}
-          PORTFOLIO_CHAT_ID: ${{ secrets.PORTFOLIO_CHAT_ID }}
         run: python action_bot.py
 
-      - name: Infra heartbeat (safe)
+      - name: Run Portfolio Bot
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-          MARKET_CHAT_ID: ${{ secrets.MARKET_CHAT_ID }}
-        run: |
-          curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
-          -d "chat_id=$MARKET_CHAT_ID" \
-          -d "text=🟢 Beast Bot infra OK — workflow executed"
+          PORTFOLIO_CHAT_ID: ${{ secrets.PORTFOLIO_CHAT_ID }}
+          PORTFOLIO_COINS: ${{ vars.PORTFOLIO_COINS }}
+          PORTFOLIO_WEIGHTS: ${{ vars.PORTFOLIO_WEIGHTS }}
+        run: python portfolio_bot.py
