@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "Which bot to run (market | action | portfolio | all)"
+        description: "Which bot to run (market, action, portfolio, all)"
         required: false
         default: "all"
   schedule:
@@ -29,35 +29,24 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests python-telegram-bot schedule
 
-      - name: Run Selected Bots
+      - name: Run Market Bot
+        if: ${{ github.event.inputs.mode == 'market' || github.event.inputs.mode == 'all' || github.event.inputs.mode == '' }}
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           MARKET_CHAT_ID: ${{ secrets.MARKET_CHAT_ID }}
-          ACTION_CHAT_ID: ${{ secrets.ACTION_CHAT_ID }}
-          PORTFOLIO_CHAT_ID: ${{ secrets.PORTFOLIO_CHAT_ID }}
-          PORTFOLIO_JSON: ${{ vars.PORTFOLIO_JSON }}
-        run: |
-          MODE="${{ github.event.inputs.mode }}"
-          echo "Running mode: $MODE"
+        run: python market_bot.py
 
-          if [ "$MODE" = "market" ]; then
-            python market_bot.py
-
-          elif [ "$MODE" = "action" ]; then
-            python action_bot.py
-
-          elif [ "$MODE" = "portfolio" ]; then
-            python portfolio_bot.py
-
-          else
-            python market_bot.py
-            python action_bot.py
-            python portfolio_bot.py
-          fi
-- name: Telegram Trigger Helper
+      - name: Run Action Bot
+        if: ${{ github.event.inputs.mode == 'action' || github.event.inputs.mode == 'all' || github.event.inputs.mode == '' }}
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           ACTION_CHAT_ID: ${{ secrets.ACTION_CHAT_ID }}
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
-        run: |
-          echo "Telegram trigger helper available"
+        run: python action_bot.py
+
+      - name: Run Portfolio Bot
+        if: ${{ github.event.inputs.mode == 'portfolio' || github.event.inputs.mode == 'all' || github.event.inputs.mode == '' }}
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          PORTFOLIO_CHAT_ID: ${{ secrets.PORTFOLIO_CHAT_ID }}
+          PORTFOLIO_JSON: ${{ vars.PORTFOLIO_JSON }}
+        run: python portfolio_bot.py
