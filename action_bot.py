@@ -1,9 +1,12 @@
+import os
 import schedule
 import time
 from telegram import Bot
-from config import BOT_TOKEN, ACTION_CHAT_ID
 from market_bot import macro_score, narrative_check
 from portfolio_bot import PORTFOLIO
+
+BOT_TOKEN = os.environ["BOT_TOKEN"]
+ACTION_CHAT_ID = os.environ["ACTION_CHAT_ID"]
 
 bot = Bot(BOT_TOKEN)
 
