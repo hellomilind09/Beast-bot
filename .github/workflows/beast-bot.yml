@@ -1,9 +1,10 @@
-name: Beast Bots Runner
+name: Beast Bot
 
 on:
+  push:
   workflow_dispatch:
   schedule:
-    - cron: "0 */3 * * *"
+    - cron: "*/30 * * * *"
 
 jobs:
   run-bots:
@@ -36,8 +37,8 @@ jobs:
         run: python action_bot.py
 
       - name: Run Portfolio Bot
-  env:
-    BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-    PORTFOLIO_CHAT_ID: ${{ secrets.PORTFOLIO_CHAT_ID }}
-    PORTFOLIO_JSON: ${{ vars.PORTFOLIO_JSON }}
-  run: python portfolio_bot.py
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          PORTFOLIO_CHAT_ID: ${{ secrets.PORTFOLIO_CHAT_ID }}
+          PORTFOLIO_JSON: ${{ vars.PORTFOLIO_JSON }}
+        run: python portfolio_bot.py
