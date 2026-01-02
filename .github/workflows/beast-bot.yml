@@ -54,3 +54,10 @@ jobs:
             python action_bot.py
             python portfolio_bot.py
           fi
+- name: Telegram Trigger Helper
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          ACTION_CHAT_ID: ${{ secrets.ACTION_CHAT_ID }}
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: |
+          echo "Telegram trigger helper available"
