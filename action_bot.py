@@ -1,4 +1,3 @@
-action_bot.py
 import schedule, time
 from telegram import Bot
 from config import BOT_TOKEN, ACTION_CHAT_ID
