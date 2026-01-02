@@ -10,122 +10,89 @@ PORTFOLIO_JSON = os.getenv("PORTFOLIO_JSON")
 
 bot = Bot(token=BOT_TOKEN)
 
-# -------------------------
-# DATA SOURCES
-# -------------------------
+def safe_send(text):
+    try:
+        bot.send_message(chat_id=CHAT_ID, text=text)
+    except Exception as e:
+        print("Telegram send failed:", e)
 
-def fetch_coingecko(coin_ids):
-    url = "https://api.coingecko.com/api/v3/coins/markets"
-    params = {
-        "vs_currency": "usd",
-        "ids": ",".join(coin_ids),
-        "price_change_percentage": "24h,7d"
-    }
-    r = requests.get(url, params=params, timeout=15)
-    if r.status_code != 200:
-        return None
-    data = r.json()
-    if not data:
-        return None
-    return {c["id"]: c for c in data}
-
-
-def fetch_cryptocompare(symbols):
-    url = "https://min-api.cryptocompare.com/data/pricemultifull"
-    params = {
-        "fsyms": ",".join(symbols),
-        "tsyms": "USD"
-    }
-    r = requests.get(url, params=params, timeout=15)
-    if r.status_code != 200:
-        return None
-    data = r.json().get("RAW", {})
-    if not data:
-        return None
-    return data
-
-
-# -------------------------
-# MAIN LOGIC
-# -------------------------
-
-def run_portfolio_bot():
+def run():
     now = datetime.utcnow().strftime("%d %b %Y | %H:%M UTC")
 
-    try:
-        portfolio = json.loads(PORTFOLIO_JSON)
-    except Exception:
-        bot.send_message(chat_id=CHAT_ID, text="⚠️ Invalid portfolio JSON.")
+    # --------- HARD ENV CHECK ----------
+    if not BOT_TOKEN or not CHAT_ID:
+        print("Missing BOT_TOKEN or CHAT_ID")
         return
 
-    coin_ids = list(portfolio.keys())
+    if not PORTFOLIO_JSON:
+        safe_send(
+            f"📊 PORTFOLIO INTELLIGENCE\n🕒 {now}\n\n"
+            "❌ PORTFOLIO_JSON variable is EMPTY.\n"
+            "Check GitHub → Settings → Variables."
+        )
+        return
 
-    # ---- Try CoinGecko first
-    cg_data = fetch_coingecko(coin_ids)
+    # --------- PARSE PORTFOLIO ----------
+    try:
+        portfolio = json.loads(PORTFOLIO_JSON)
+    except Exception as e:
+        safe_send(
+            f"📊 PORTFOLIO INTELLIGENCE\n🕒 {now}\n\n"
+            f"❌ Invalid PORTFOLIO_JSON format\n{e}"
+        )
+        return
 
-    use_fallback = False
-    if not cg_data:
-        use_fallback = True
+    # --------- FETCH DATA (CoinGecko) ----------
+    ids = ",".join(portfolio.keys())
+    url = "https://api.coingecko.com/api/v3/coins/markets"
 
-    # ---- Fallback to CryptoCompare
-    cc_data = None
-    if use_fallback:
-        symbol_map = {
-            "vechain": "VET",
-            "optimism": "OP",
-            "avalanche-2": "AVAX",
-            "near": "NEAR",
-            "arweave": "AR"
-        }
-        symbols = [symbol_map[c] for c in coin_ids if c in symbol_map]
-        cc_data = fetch_cryptocompare(symbols)
+    try:
+        r = requests.get(
+            url,
+            params={"vs_currency": "usd", "ids": ids},
+            timeout=15
+        )
+        data = r.json() if r.status_code == 200 else []
+    except Exception as e:
+        data = []
 
-        if not cc_data:
-            bot.send_message(
-                chat_id=CHAT_ID,
-                text=f"📊 PORTFOLIO INTELLIGENCE\n🕒 {now}\n\n⚠️ All market data sources unavailable."
-            )
-            return
+    if not data:
+        safe_send(
+            f"📊 PORTFOLIO INTELLIGENCE\n🕒 {now}\n\n"
+            "⚠️ CoinGecko returned no data.\n"
+            "This is likely rate limiting.\n"
+            "Portfolio still loaded successfully."
+        )
+        return
 
-    # -------------------------
-    # BUILD REPORT
-    # -------------------------
-
+    # --------- BUILD REPORT ----------
     lines = [
         "📊 PORTFOLIO INTELLIGENCE",
         f"🕒 {now}",
         "",
-        "📦 Allocation Overview"
+        "📦 Holdings Overview"
     ]
 
-    for coin, weight in portfolio.items():
-        if not use_fallback:
-            price = cg_data[coin]["current_price"]
-            chg = cg_data[coin].get("price_change_percentage_24h", 0)
-        else:
-            sym = symbol_map[coin]
-            raw = cc_data[sym]["USD"]
-            price = raw["PRICE"]
-            chg = raw["CHANGEPCT24HOUR"]
+    for coin in data:
+        w = portfolio.get(coin["id"], 0)
+        price = coin["current_price"]
+        chg = coin.get("price_change_percentage_24h", 0)
 
         lines.append(
-            f"• {coin.upper():<10} {weight:.1f}% | ${price:.2f} | {chg:+.2f}% (24h)"
+            f"• {coin['symbol'].upper():<5} | {w:.1f}% | "
+            f"${price:.2f} | {chg:+.2f}% (24h)"
         )
 
-    # -------------------------
-    # STRATEGIC INSIGHT
-    # -------------------------
-
+    # --------- STRATEGY ----------
     lines += [
         "",
-        "🧠 STRATEGY VIEW",
-        "• Short-term: Volatility-driven, watch BTC correlation",
-        "• Mid-term: Infra + L1 heavy — rotation dependent",
-        "• Long-term: Strong fundamental exposure, but concentration risk on VET"
+        "🧠 STRATEGIC VIEW",
+        "• Short-term: Volatility driven, watch BTC correlation",
+        "• Mid-term: Heavy L1 + Infra exposure",
+        "• Long-term: Strong fundamentals, VET concentration risk"
     ]
 
-    bot.send_message(chat_id=CHAT_ID, text="\n".join(lines))
-
+    safe_send("\n".join(lines))
 
 if __name__ == "__main__":
-    run_portfolio_bot()
+    run()
