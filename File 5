@@ -1,1 +1,5 @@
 requirements.txt
+python-telegram-bot
+requests
+schedule
+pygithub
