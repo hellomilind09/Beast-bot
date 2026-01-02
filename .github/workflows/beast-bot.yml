@@ -2,7 +2,7 @@ name: Beast Market Bot
 
 on:
   schedule:
-    - cron: "0 */3 * * *"   # runs every 3 hours
+    - cron: "0 */3 * * *"
   workflow_dispatch:
 
 jobs:
@@ -34,9 +34,8 @@ jobs:
         run: python portfolio_bot.py
 
       - name: Run Action Bot
-  env:
-    BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-    ACTION_CHAT_ID: ${{ secrets.ACTION_CHAT_ID }}
-    MARKET_CHAT_ID: ${{ secrets.MARKET_CHAT_ID }}
-  run: python action_bot.py
-# force workflow refresh
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          ACTION_CHAT_ID: ${{ secrets.ACTION_CHAT_ID }}
+          MARKET_CHAT_ID: ${{ secrets.MARKET_CHAT_ID }}
+        run: python action_bot.py
