@@ -1,4 +1,6 @@
-import requests, schedule, time
+import requests
+import schedule
+import time
 from telegram import Bot
 from config import BOT_TOKEN, MARKET_CHAT_ID
 
@@ -11,33 +13,42 @@ def cg(ids):
     ).json()
 
 def macro_score():
-    p = cg("bitcoin,ethereum,pax-gold")
+    prices = cg("bitcoin,ethereum,pax-gold")
     score = 50
-    if p["ethereum"]["usd"] / p["bitcoin"]["usd"] > 0.07:
+
+    if prices["ethereum"]["usd"] / prices["bitcoin"]["usd"] > 0.07:
         score += 20
-    if p["pax-gold"]["usd"] > 2000:
+
+    if prices["pax-gold"]["usd"] > 2000:
         score -= 15
+
     return score
 
 def narrative_check(category):
     r = requests.get(
         "https://api.coingecko.com/api/v3/coins/markets",
-        params={"vs_currency": "usd", "category": category, "price_change_percentage": "7d"}
+        params={
+            "vs_currency": "usd",
+            "category": category,
+            "price_change_percentage": "7d"
+        }
     ).json()
+
     return len([c for c in r if c.get("price_change_percentage_7d", 0) > 15])
 
 def market_report():
     macro = macro_score()
     ai = narrative_check("artificial-intelligence")
-    msg = f"""
-🧠 MARKET INTEL
+
+    message = f"""
+🧠 BEAST • MARKET
 
 Macro Score: {macro}/100
 AI Narrative Breadth: {ai}
 
 (No portfolio bias)
 """
-    bot.send_message(chat_id=MARKET_CHAT_ID, text=msg)
+    bot.send_message(chat_id=MARKET_CHAT_ID, text=message)
 
 schedule.every(12).hours.do(market_report)
 
