@@ -1,13 +1,7 @@
 name: Beast Bot
 
 on:
-  push:
   workflow_dispatch:
-    inputs:
-      mode:
-        description: "Which bot to run (market, action, portfolio, all)"
-        required: false
-        default: "all"
   schedule:
     - cron: "*/30 * * * *"
 
@@ -30,40 +24,28 @@ jobs:
           pip install requests python-telegram-bot schedule
 
       - name: Run Market Bot
-        if: ${{ github.event.inputs.mode == 'market' || github.event.inputs.mode == 'all' || github.event.inputs.mode == '' }}
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           MARKET_CHAT_ID: ${{ secrets.MARKET_CHAT_ID }}
         run: python market_bot.py
 
       - name: Run Action Bot
-        if: ${{ github.event.inputs.mode == 'action' || github.event.inputs.mode == 'all' || github.event.inputs.mode == '' }}
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           ACTION_CHAT_ID: ${{ secrets.ACTION_CHAT_ID }}
         run: python action_bot.py
 
       - name: Run Portfolio Bot
-        if: ${{ github.event.inputs.mode == 'portfolio' || github.event.inputs.mode == 'all' || github.event.inputs.mode == '' }}
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           PORTFOLIO_CHAT_ID: ${{ secrets.PORTFOLIO_CHAT_ID }}
           PORTFOLIO_JSON: ${{ vars.PORTFOLIO_JSON }}
         run: python portfolio_bot.py
 
-trigger-bot:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - run: pip install python-telegram-bot requests
-
-      - name: Run Telegram Trigger Bot
+      - name: Telegram Trigger Helper
+        if: github.event_name == 'workflow_dispatch'
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          ACTION_CHAT_ID: ${{ secrets.ACTION_CHAT_ID }}
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
         run: python trigger_bot.py
