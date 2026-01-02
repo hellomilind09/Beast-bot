@@ -6,50 +6,50 @@ from datetime import datetime
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 MARKET_CHAT_ID = os.environ["MARKET_CHAT_ID"]
 
-TG_URL = "https://api.telegram.org/bot" + BOT_TOKEN + "/sendMessage"
+TG_URL = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
 CG = "https://api.coingecko.com/api/v3"
 
 
 # ================= TELEGRAM =================
 def send_message(text):
-    data = {}
-    data["chat_id"] = MARKET_CHAT_ID
-    data["text"] = text
-    data["parse_mode"] = "HTML"
-    data["disable_web_page_preview"] = True
-    requests.post(TG_URL, data=data, timeout=20)
+    payload = {
+        "chat_id": MARKET_CHAT_ID,
+        "text": text,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True
+    }
+    requests.post(TG_URL, data=payload, timeout=20)
 
 
 # ================= DATA =================
 def get_global():
-    r = requests.get(CG + "/global", timeout=20)
+    r = requests.get(f"{CG}/global", timeout=20)
     return r.json()["data"]
 
 
 def get_categories():
-    r = requests.get(CG + "/coins/categories", timeout=20)
+    r = requests.get(f"{CG}/coins/categories", timeout=20)
     return r.json()
 
 
 def get_category_coins(cat_id):
-    params = {}
-    params["vs_currency"] = "usd"
-    params["category"] = cat_id
-    params["order"] = "market_cap_desc"
-    params["per_page"] = 10
-    params["page"] = 1
-    params["price_change_percentage"] = "7d"
-
-    r = requests.get(CG + "/coins/markets", params=params, timeout=20)
+    params = {
+        "vs_currency": "usd",
+        "category": cat_id,
+        "order": "market_cap_desc",
+        "per_page": 10,
+        "page": 1,
+        "price_change_percentage": "7d"
+    }
+    r = requests.get(f"{CG}/coins/markets", params=params, timeout=20)
     return r.json()
 
 
 # ================= MACRO =================
 def macro_view():
     g = get_global()
-
-    btc_d = round(g["market_cap_percentage"]["btc"], 2)
-    eth_d = round(g["market_cap_percentage"]["eth"], 2)
+    btc_d = round(g["market_cap_percentage"].get("btc", 0), 2)
+    eth_d = round(g["market_cap_percentage"].get("eth", 0), 2)
 
     if btc_d > 52:
         regime = "Risk-Off"
@@ -64,7 +64,7 @@ def macro_view():
     return btc_d, eth_d, regime, score
 
 
-# ================= NARRATIVE ANALYSIS =================
+# ================= NARRATIVE =================
 def analyze_category(cat):
     coins = get_category_coins(cat["id"])
 
@@ -72,6 +72,10 @@ def analyze_category(cat):
     changes = []
 
     for c in coins:
+        # 🔒 HARD GUARD (THIS FIXES YOUR CRASH)
+        if not isinstance(c, dict):
+            continue
+
         pct = c.get("price_change_percentage_7d")
         if pct is None:
             continue
@@ -79,9 +83,8 @@ def analyze_category(cat):
         changes.append(pct)
 
         if pct >= 15:
-            movers.append(
-                c["symbol"].upper() + " +" + str(round(pct, 1)) + "%"
-            )
+            symbol = c.get("symbol", "").upper()
+            movers.append(f"{symbol} +{round(pct,1)}%")
 
     if not changes:
         return None
@@ -96,10 +99,10 @@ def analyze_category(cat):
         strength = "🔴 COOL"
 
     return {
-        "name": cat["name"],
+        "name": cat.get("name", "Unknown"),
         "avg": round(avg, 1),
         "strength": strength,
-        "movers": movers[:4],
+        "movers": movers[:4]
     }
 
 
@@ -112,13 +115,13 @@ def market_report():
 
     lines = []
     lines.append("🧠 <b>MARKET SNAPSHOT</b>")
-    lines.append("🕒 " + now)
+    lines.append(f"🕒 {now}")
     lines.append("")
     lines.append("<b>MACRO</b>")
-    lines.append("• BTC Dominance: " + str(btc_d) + "%")
-    lines.append("• ETH Dominance: " + str(eth_d) + "%")
-    lines.append("• Regime: " + regime)
-    lines.append("• Macro Score: " + str(score) + "/100")
+    lines.append(f"• BTC Dominance: {btc_d}%")
+    lines.append(f"• ETH Dominance: {eth_d}%")
+    lines.append(f"• Regime: {regime}")
+    lines.append(f"• Macro Score: {score}/100")
     lines.append("")
     lines.append("<b>ACTIVE NARRATIVES</b>")
 
@@ -128,18 +131,16 @@ def market_report():
         info = analyze_category(cat)
         if not info:
             continue
-
         if info["strength"] == "🔴 COOL":
             continue
 
         lines.append("")
         lines.append(
-            info["strength"] + " <b>" + info["name"] + "</b> (avg " +
-            str(info["avg"]) + "%)"
+            f'{info["strength"]} <b>{info["name"]}</b> (avg {info["avg"]}%)'
         )
 
         for m in info["movers"]:
-            lines.append("• " + m)
+            lines.append(f"• {m}")
 
         shown += 1
         if shown >= 8:
