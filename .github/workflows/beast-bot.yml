@@ -3,7 +3,7 @@ name: Beast Market Bot
 on:
   workflow_dispatch:
   schedule:
-  - cron: "0 * * * *"
+  - cron: "3 * * * *"
 
 jobs:
   run-bots:
