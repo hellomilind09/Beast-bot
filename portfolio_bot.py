@@ -1,4 +1,3 @@
-portfolio_bot.py
 import schedule, time
 from telegram import Bot
 from config import BOT_TOKEN, PORTFOLIO_CHAT_ID
