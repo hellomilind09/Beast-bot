@@ -1,40 +1,127 @@
 import os
 import requests
-from datetime import datetime, timezone
+import time
+from datetime import datetime
 
-# =========================
-# ENV
-# =========================
+# ================== ENV ==================
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 MARKET_CHAT_ID = os.environ["MARKET_CHAT_ID"]
 
 TG_URL = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
 
-# =========================
-# CONFIG
-# =========================
-VS = "usd"
-TOP_N = 100
+COINGECKO = "https://api.coingecko.com/api/v3"
 
-STRONG_MOVE = 15
-MODERATE_MOVE = 5
+# ================== TELEGRAM ==================
+def send(msg):
+    try:
+        requests.post(
+            TG_URL,
+            data={
+                "chat_id": MARKET_CHAT_ID,
+                "text": msg,
+                "parse_mode": "HTML"
+            },
+            timeout=20
+        )
+    except Exception as e:
+        print("Telegram error:", e)
 
+# ================== DATA ==================
+def get_top_coins():
+    url = f"{COINGECKO}/coins/markets"
+    params = {
+        "vs_currency": "usd",
+        "order": "market_cap_desc",
+        "per_page": 200,
+        "page": 1,
+        "price_change_percentage": "24h,7d"
+    }
+    r = requests.get(url, params=params, timeout=20)
+    return r.json()
+
+def get_btc_dominance():
+    r = requests.get(f"{COINGECKO}/global", timeout=20).json()
+    return round(r["data"]["market_cap_percentage"]["btc"], 2)
+
+# ================== NARRATIVES ==================
 NARRATIVES = {
-    "AI / Compute": ["render-token", "fetch-ai", "bittensor"],
-    "Privacy": ["zcash", "monero", "secret"],
+    "AI / Compute": ["render-token", "fetch-ai", "akash-network"],
+    "Privacy Coins": ["zcash", "monero"],
     "Layer 2s": ["arbitrum", "optimism", "polygon"],
-    "DePIN / Infra": ["helium", "iotex"],
-    "Gaming": ["immutable-x", "gala"],
-    "RWA / Tokenization": ["ondo-finance", "chainlink"]
+    "Gaming": ["immutable-x", "gala", "beam"],
+    "DePIN / Infra": ["helium", "filecoin"]
 }
 
-# =========================
-# TELEGRAM
-# =========================
-def send(msg):
-    requests.post(
-        TG_URL,
-        data={
+def analyze_narratives(coins):
+    results = {}
+
+    for name, ids in NARRATIVES.items():
+        movers = []
+        for c in coins:
+            if c["id"] in ids:
+                if c.get("price_change_percentage_7d_in_currency", 0) > 15:
+                    movers.append(
+                        f"{c['symbol'].upper()} +{round(c['price_change_percentage_7d_in_currency'],1)}%"
+                    )
+
+        if movers:
+            results[name] = ("Strong", movers)
+        else:
+            results[name] = ("Weak", [])
+
+    return results
+
+# ================== MACRO ==================
+def macro_score(btc_d):
+    if btc_d > 55:
+        return 35, "Risk-Off"
+    elif btc_d > 48:
+        return 50, "Neutral"
+    else:
+        return 70, "Risk-On"
+
+# ================== REPORT ==================
+def market_report():
+    coins = get_top_coins()
+    btc_d = get_btc_dominance()
+
+    score, regime = macro_score(btc_d)
+    narratives = analyze_narratives(coins)
+
+    now = datetime.utcnow().strftime("%d %b %Y | %H:%M UTC")
+
+    msg = f"""🧠 <b>MARKET SNAPSHOT</b>
+⏰ {now}
+
+<b>Macro</b>
+• BTC Dominance: {btc_d}%
+• Regime: {regime}
+• Macro Score: {score}/100
+
+<b>Narratives</b>
+"""
+
+    for n, data in narratives.items():
+        strength, movers = data
+
+        if strength == "Strong":
+            emoji = "🟢"
+        else:
+            emoji = "🔴"
+
+        msg += f"\n{emoji} <b>{n}</b>: {strength}"
+        if movers:
+            msg += "\n   " + ", ".join(movers)
+
+    # BTC dominance conflict warning
+    if btc_d > 55:
+        msg += "\n\n⚠️ <b>BTC dominance high → alts suppressed</b>"
+
+    send(msg)
+
+# ================== RUN ==================
+if __name__ == "__main__":
+    market_report()        data={
             "chat_id": MARKET_CHAT_ID,
             "text": msg,
             "parse_mode": "HTML"
