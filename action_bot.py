@@ -13,7 +13,6 @@ TG_URL = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
 STATE_FILE = "action_state.json"
 
 COINGECKO = "https://api.coingecko.com/api/v3"
-
 COOLDOWN_HOURS = 6
 
 # ===================== STATE =====================
@@ -42,7 +41,7 @@ def send(msg):
     )
 
 # ===================== DATA =====================
-def get_top_markets():
+def get_markets():
     try:
         r = requests.get(
             f"{COINGECKO}/coins/markets",
@@ -62,7 +61,21 @@ def get_top_markets():
         pass
     return []
 
-# ===================== LOGIC =====================
+# ===================== SIGNAL LOGIC =====================
+def impulse_quality(p24):
+    if p24 >= 40:
+        return "Very Fast Impulse"
+    if p24 >= 25:
+        return "Fast Expansion"
+    return "Gradual Move"
+
+def follow_through_risk(p24):
+    if p24 >= 45:
+        return "Late / Overextended"
+    if p24 >= 25:
+        return "Mid-Impulse"
+    return "Early"
+
 def in_cooldown(symbol, state):
     last = state.get(symbol)
     if not last:
@@ -75,78 +88,71 @@ def mark_alerted(symbol, state):
 
 def detect_actions(coins, state):
     alerts = []
-    narrative_hits = {}
 
     for c in coins:
         if not isinstance(c, dict):
             continue
 
         symbol = c.get("symbol", "").upper()
-        p24 = c.get("price_change_percentage_24h")
-        p7d = c.get("price_change_percentage_7d_in_currency")
-
         if not symbol:
             continue
 
         if in_cooldown(symbol, state):
             continue
 
-        triggered = False
-        reason = ""
+        p24 = c.get("price_change_percentage_24h")
+        p7d = c.get("price_change_percentage_7d_in_currency")
+        vol = c.get("total_volume")
+        mc = c.get("market_cap")
 
-        if p24 is not None and p24 >= 25:
-            triggered = True
-            reason = f"+{p24:.1f}% in 24h"
-        elif p7d is not None and p7d >= 60:
-            triggered = True
-            reason = f"+{p7d:.1f}% in 7D"
-
-        if not triggered:
+        if p24 is None or vol is None or mc is None:
             continue
 
-        tag = "[HELD]" if symbol in PORTFOLIO else "[WATCH]"
-        alerts.append(f"⚠️ <b>{symbol}</b> {reason} {tag}")
+        # Core trigger
+        if p24 < 25 and (p7d is None or p7d < 60):
+            continue
 
+        vol_ratio = vol / mc if mc > 0 else 0
+
+        impulse = impulse_quality(p24)
+        extension = follow_through_risk(p24)
+
+        volume_signal = (
+            "Strong Volume Confirmation" if vol_ratio > 0.15
+            else "Weak Volume Confirmation"
+        )
+
+        tag = "HELD" if symbol in PORTFOLIO else "WATCH"
+
+        msg = []
+        msg.append(f"<b>{symbol}</b> anomaly detected")
+        msg.append(f"Move: +{p24:.1f}% (24h)")
+        msg.append(f"Impulse Quality: {impulse}")
+        msg.append(f"Volume Signal: {volume_signal}")
+        msg.append(f"Follow-through Risk: {extension}")
+        msg.append(f"Portfolio: [{tag}]")
+
+        alerts.append("\n".join(msg))
         mark_alerted(symbol, state)
 
-        cat = c.get("category")
-        if cat:
-            narrative_hits.setdefault(cat, []).append(symbol)
-
-    # Narrative ignition detection
-    narrative_alerts = []
-    for cat, syms in narrative_hits.items():
-        if len(syms) >= 3:
-            narrative_alerts.append(
-                f"🔥 <b>Narrative ignition</b>: {cat} ({', '.join(syms[:4])})"
-            )
-
-    return alerts, narrative_alerts
+    return alerts
 
 # ===================== RUN =====================
 def action_report():
-    coins = get_top_markets()
+    coins = get_markets()
     state = load_state()
 
-    alerts, narrative_alerts = detect_actions(coins, state)
-
-    if not alerts and not narrative_alerts:
-        return  # silence is intentional
+    alerts = detect_actions(coins, state)
+    if not alerts:
+        return
 
     now = datetime.utcnow().strftime("%d %b %Y | %H:%M UTC")
 
     msg = "<b>🚨 ACTION ALERT</b>\n"
     msg += f"🕒 {now}\n\n"
+    msg += "\n\n".join(alerts)
 
-    for a in alerts:
-        msg += a + "\n"
-
-    if narrative_alerts:
-        msg += "\n"
-        for n in narrative_alerts:
-            msg += n + "\n"
-
-    send(msg.strip())
+    send(msg)
     save_state(state)
 
 if __name__ == "__main__":
