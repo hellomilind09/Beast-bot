@@ -53,8 +53,5 @@ AI Narrative Breadth: {ai}
 """
     bot.send_message(chat_id=MARKET_CHAT_ID, text=message)
 
-schedule.every(12).hours.do(market_report)
-
-while True:
-    schedule.run_pending()
-    time.sleep(60)
+if __name__ == "__main__":
+    market_report()
