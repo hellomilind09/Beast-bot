@@ -1,4 +1,3 @@
-market_bot.py
 import requests, schedule, time
 from telegram import Bot
 from config import BOT_TOKEN, MARKET_CHAT_ID
