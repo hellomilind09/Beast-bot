@@ -42,7 +42,15 @@ weighted_move = 0
 volatility_score = 0
 
 for c, w in portfolio.items():
-    sym = c.upper()
+    SYMBOL_MAP = {
+    "vechain": "VET",
+    "optimism": "OP",
+    "avalanche-2": "AVAX",
+    "near": "NEAR",
+    "arweave": "AR"
+}
+
+sym = SYMBOL_MAP.get(c, c.upper())
     try:
         data = prices[sym]["USD"]
         price = data["PRICE"]
