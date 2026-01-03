@@ -1,5 +1,4 @@
 import os
-import json
 import requests
 from datetime import datetime
 
@@ -9,144 +8,93 @@ PORTFOLIO_JSON = os.getenv("PORTFOLIO_JSON")
 
 TG_URL = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
 
+# ---------- helpers ----------
+
 def send(msg):
-    requests.post(
-        TG_URL,
-        json={"chat_id": CHAT_ID, "text": msg, "disable_web_page_preview": True},
-        timeout=15
+    requests.post(TG_URL, json={
+        "chat_id": CHAT_ID,
+        "text": msg,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True
+    }, timeout=10)
+
+def fetch_prices(coins):
+    ids = ",".join(coins)
+    url = (
+        "https://min-api.cryptocompare.com/data/pricemultifull"
+        f"?fsyms={','.join([c.upper() for c in coins])}&tsyms=USD"
     )
+    r = requests.get(url, timeout=10).json()
+    return r.get("RAW", {})
 
-# ---------- DATA SOURCES ----------
+# ---------- main ----------
 
-def fetch_coingecko(ids):
+if not PORTFOLIO_JSON:
+    send("⚠️ Portfolio data missing.")
+    exit()
+
+portfolio = eval(PORTFOLIO_JSON)
+coins = list(portfolio.keys())
+prices = fetch_prices(coins)
+
+lines = []
+weighted_move = 0
+volatility_score = 0
+
+for c, w in portfolio.items():
+    sym = c.upper()
     try:
-        r = requests.get(
-            "https://api.coingecko.com/api/v3/coins/markets",
-            params={
-                "vs_currency": "usd",
-                "ids": ",".join(ids),
-                "price_change_percentage": "24h,7d"
-            },
-            timeout=15
-        )
-        if r.status_code != 200:
-            return None
-        data = r.json()
-        return data if isinstance(data, list) and data else None
-    except Exception:
-        return None
+        data = prices[sym]["USD"]
+        price = data["PRICE"]
+        chg = data["CHANGEPCT24HOUR"]
+        weighted_move += chg * (w / 100)
+        volatility_score += abs(chg) * (w / 100)
+        lines.append(f"• {sym:<5} | {w:>4.1f}% | ${price:.2f} | {chg:+.2f}%")
+    except:
+        lines.append(f"• {sym:<5} | data unavailable")
 
-def fetch_cryptocompare(symbols):
-    try:
-        r = requests.get(
-            "https://min-api.cryptocompare.com/data/pricemultifull",
-            params={"fsyms": ",".join(symbols), "tsyms": "USD"},
-            timeout=15
-        )
-        raw = r.json().get("RAW", {})
-        return raw if raw else None
-    except Exception:
-        return None
+# ---------- intelligence layers ----------
 
-# ---------- MAIN ----------
+if weighted_move > 2:
+    short_term = "Momentum strong → risk-on bias acceptable"
+elif weighted_move < -2:
+    short_term = "Drawdown pressure → protect downside"
+else:
+    short_term = "Range-bound → patience favored"
 
-def run():
-    now = datetime.utcnow().strftime("%d %b %Y | %H:%M UTC")
+if volatility_score > 6:
+    mid_term = "Volatility expanding → reduce overweight positions"
+elif volatility_score < 3:
+    mid_term = "Volatility compressed → breakout risk building"
+else:
+    mid_term = "Healthy rotation environment"
 
-    portfolio = json.loads(PORTFOLIO_JSON)
+if portfolio.get("vechain", 0) > 25:
+    long_term = "High single-theme exposure → diversification advised"
+else:
+    long_term = "Balanced long-cycle exposure maintained"
 
-    id_to_symbol = {
-        "vechain": "VET",
-        "optimism": "OP",
-        "avalanche-2": "AVAX",
-        "near": "NEAR",
-        "arweave": "AR"
-    }
+# ---------- message ----------
 
-    ids = list(portfolio.keys())
-    symbols = [id_to_symbol[i] for i in ids if i in id_to_symbol]
+msg = f"""
+📊 <b>PORTFOLIO INTELLIGENCE</b>
+🕒 {datetime.utcnow().strftime('%d %b %Y | %H:%M UTC')}
 
-    data = fetch_coingecko(ids)
-    source = "CoinGecko"
+<b>Holdings</b>
+{chr(10).join(lines)}
 
-    if not data:
-        cc = fetch_cryptocompare(symbols)
-        source = "CryptoCompare"
-        data = []
+<b>Portfolio Pulse</b>
+• Weighted 24h move: {weighted_move:+.2f}%
+• Volatility score: {volatility_score:.2f}
 
-        if cc:
-            for cid, sym in id_to_symbol.items():
-                if sym in cc:
-                    usd = cc[sym]["USD"]
-                    data.append({
-                        "id": cid,
-                        "symbol": sym.lower(),
-                        "current_price": usd["PRICE"],
-                        "price_change_percentage_24h": usd["CHANGEPCT24HOUR"],
-                        "price_change_percentage_7d_in_currency": None
-                    })
+<b>⏱ Short Term</b>
+{short_term}
 
-    # ---------- BUILD MESSAGE ----------
+<b>📆 Mid Term</b>
+{mid_term}
 
-    lines = [
-        "📊 PORTFOLIO INTELLIGENCE",
-        f"🕒 {now}",
-        f"📡 Data source: {source}",
-        ""
-    ]
+<b>🕰 Long Term</b>
+{long_term}
+"""
 
-    if not data:
-        lines += [
-            "⚠️ Live price data unavailable.",
-            "",
-            "🧠 STRATEGIC VIEW (Data-independent)",
-            "• Portfolio is infra + L1 heavy",
-            "• High single-asset exposure (VET ~29%)",
-            "• Low hedge / BTC-beta exposure",
-            "• Works best in risk-on environments"
-        ]
-        send("\n".join(lines))
-        return
-
-    total_infra = 0
-    for c in data:
-        w = portfolio.get(c["id"], 0)
-        price = c["current_price"]
-        p24 = c.get("price_change_percentage_24h", 0)
-        p7 = c.get("price_change_percentage_7d_in_currency")
-
-        lines.append(
-            f"• {c['symbol'].upper():<5} | {w:.1f}% | ${price:.2f} | "
-            f"{p24:+.2f}% (24h)"
-        )
-
-        if c["id"] in ["vechain", "optimism", "avalanche-2", "near"]:
-            total_infra += w
-
-    # ---------- STRATEGY ----------
-
-    lines += [
-        "",
-        "🧠 TIME HORIZON ANALYSIS",
-        "",
-        "⏱ SHORT TERM (days–weeks)",
-        "• Sensitive to BTC chop & funding shifts",
-        "• Overweight positions amplify volatility",
-        "",
-        "📆 MID TERM (weeks–months)",
-        "• Strong infra correlation → rotation risk",
-        "• Needs narrative tailwinds (AI, L2 activity)",
-        "",
-        "🕰 LONG TERM (cycle)",
-        "• Solid fundamental exposure",
-        "• Concentration risk if single narrative underperforms",
-        "",
-        "⚠️ RISK NOTES",
-        f"• Infra + L1 exposure ≈ {round(total_infra,1)}%",
-        "• Consider diversification for drawdown control"
-    ]
-
-    send("\n".join(lines))
-
-if __name__ == "__main__":
-    run()
+send(msg.strip())
